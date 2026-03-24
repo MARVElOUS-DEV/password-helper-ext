@@ -1,0 +1,51 @@
+:root {
+  color-scheme: light;
+  font-family: 'Avenir Next', 'Segoe UI', sans-serif;
+  color: #f7f4ec;
+  background: radial-gradient(
+      circle at top right,
+      rgba(241, 183, 99, 0.22),
+      transparent 32%
+    ),
+    radial-gradient(
+      circle at bottom left,
+      rgba(113, 176, 255, 0.18),
+      transparent 30%
+    ),
+    linear-gradient(145deg, #1d2430 0%, #121721 100%);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app-container {
+  min-height: 100%;
+}
+
+body {
+  margin: 0;
+}
+
+body,
+button,
+input,
+textarea {
+  font: inherit;
+}
+
+button,
+input,
+textarea {
+  border: 0;
+}
+
+button {
+  cursor: pointer;
+}
+
+a {
+  color: inherit;
+}

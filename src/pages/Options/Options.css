@@ -105,6 +105,18 @@
   font-size: 13px;
 }
 
+.options__records-meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.options__record-meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
 .options label {
   display: flex;
   flex-direction: column;
@@ -158,6 +170,17 @@
   color: #f7f4ec;
 }
 
+.options__icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.08);
+  color: #ffd79f;
+}
+
 .options__submit {
   background: linear-gradient(135deg, #f1b763 0%, #f08b5c 100%);
   color: #1d2430;
@@ -171,6 +194,14 @@
 .options__danger {
   background: rgba(213, 73, 73, 0.18);
   color: #ffb3b3;
+}
+
+.options__submit:disabled,
+.options__ghost:disabled,
+.options__danger:disabled,
+.options__icon-button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
 }
 
 .options__status {

@@ -276,6 +276,12 @@
   gap: 14px;
 }
 
+.popup__card-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .popup__card-top h3 {
   font-size: 16px;
   line-height: 1.25;
@@ -287,6 +293,12 @@
   font-size: 13px;
 }
 
+.popup__host-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .popup__badge {
   flex-shrink: 0;
   padding: 6px 10px;
@@ -295,6 +307,30 @@
   color: #9dcbff;
   font-size: 12px;
   font-weight: 700;
+}
+
+.popup__icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.06);
+  color: #f8deb3;
+  transition: background 140ms ease, transform 140ms ease;
+}
+
+.popup__icon-button:hover {
+  background: rgba(255, 255, 255, 0.11);
+  transform: translateY(-1px);
+}
+
+.popup__icon-button--inline {
+  width: 28px;
+  height: 28px;
+  margin-top: 4px;
+  border-radius: 10px;
 }
 
 .popup__details {

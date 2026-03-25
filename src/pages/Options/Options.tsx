@@ -1,11 +1,13 @@
-import { FormEvent, useEffect, useState } from 'react';
+import { FormEvent, useEffect, useRef, useState } from 'react';
 import {
   createEmptyDraft,
   deletePasswordRecord,
   getPasswordRecords,
   savePasswordRecord,
 } from '../../shared/storage';
-import { matchesRecordSearch } from '../../shared/records';
+import { downloadPasswordRecordsCsv } from '../../shared/csv';
+import DuplicateIcon from '../../shared/DuplicateIcon';
+import { createDuplicateDraft, matchesRecordSearch } from '../../shared/records';
 import { PasswordDraft, PasswordRecord } from '../../types';
 
 function formatDate(value: string) {
@@ -22,6 +24,8 @@ export default function Options() {
   const [statusMessage, setStatusMessage] = useState('');
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
+  const [sitePatternFocusNonce, setSitePatternFocusNonce] = useState(0);
+  const sitePatternInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     let isMounted = true;
@@ -37,7 +41,7 @@ export default function Options() {
           setStatusMessage(
             error instanceof Error
               ? error.message
-              : 'Failed to load saved records.'
+              : '加载已保存记录失败。'
           );
         }
       } finally {
@@ -53,6 +57,15 @@ export default function Options() {
       isMounted = false;
     };
   }, []);
+
+  useEffect(() => {
+    if (sitePatternFocusNonce === 0) {
+      return;
+    }
+
+    sitePatternInputRef.current?.focus();
+    sitePatternInputRef.current?.select();
+  }, [sitePatternFocusNonce]);
 
   function updateDraft<K extends keyof PasswordDraft>(
     key: K,
@@ -72,7 +85,7 @@ export default function Options() {
     event.preventDefault();
 
     if (!draft.name.trim() || !draft.sitePattern.trim() || !draft.password) {
-      setStatusMessage('Name, site pattern, and password are required.');
+      setStatusMessage('名称、站点规则和密码为必填项。');
       return;
     }
 
@@ -84,12 +97,12 @@ export default function Options() {
       const nextRecords = await getPasswordRecords();
       setRecords(nextRecords);
       setDraft(createEmptyDraft());
-      setStatusMessage(`Saved "${savedRecord.name}".`);
+      setStatusMessage(`已保存「${savedRecord.name}」。`);
     } catch (error) {
       setStatusMessage(
         error instanceof Error
           ? error.message
-          : 'Failed to save the password record.'
+          : '保存密码记录失败。'
       );
     } finally {
       setIsSaving(false);
@@ -97,7 +110,7 @@ export default function Options() {
   }
 
   async function handleDelete(record: PasswordRecord) {
-    if (!window.confirm(`Delete "${record.name}"?`)) {
+    if (!window.confirm(`确定删除「${record.name}」吗？`)) {
       return;
     }
 
@@ -108,7 +121,7 @@ export default function Options() {
       resetDraft();
     }
 
-    setStatusMessage(`Deleted "${record.name}".`);
+    setStatusMessage(`已删除「${record.name}」。`);
   }
 
   function handleEdit(record: PasswordRecord) {
@@ -123,8 +136,27 @@ export default function Options() {
       passwordSelector: record.passwordSelector,
       notes: record.notes,
     });
-    setStatusMessage(`Editing "${record.name}".`);
+    setStatusMessage(`正在编辑「${record.name}」。`);
     window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+
+  function handleDuplicate(record: PasswordRecord) {
+    setDraft(createDuplicateDraft(record));
+    setStatusMessage(
+      `已复制「${record.name}」为新记录，请修改站点规则后再保存。`
+    );
+    setSitePatternFocusNonce((current) => current + 1);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+
+  function handleExportCsv() {
+    if (records.length === 0) {
+      setStatusMessage('当前没有可导出的记录。');
+      return;
+    }
+
+    downloadPasswordRecordsCsv(records);
+    setStatusMessage(`已导出 ${records.length} 条记录为 CSV 文件。`);
   }
 
   const filteredRecords = records.filter((record) =>
@@ -135,19 +167,17 @@ export default function Options() {
     <main className="options">
       <section className="options__hero">
         <div>
-          <span className="options__eyebrow">Dev Password Helper</span>
-          <h1>Manage development passwords in one place.</h1>
+          <span className="options__eyebrow">开发环境密码助手</span>
+          <h1>在一个地方管理开发环境密码。</h1>
           <p>
-            Records are stored in `chrome.storage.local` and can be matched by
-            host, subdomain, or wildcard patterns. Keep in mind that this is
-            convenient, not encrypted.
+            所有记录都保存在 `chrome.storage.local` 中，并支持按主机名、子域名或
+            通配符规则匹配。它的目标是方便使用，而不是加密保险箱。
           </p>
         </div>
         <div className="options__security">
-          <strong>Security note</strong>
+          <strong>安全提示</strong>
           <p>
-            Passwords are stored in plain text inside your local browser
-            profile.
+            密码会以明文形式保存在当前浏览器本地配置中。
           </p>
         </div>
       </section>
@@ -156,48 +186,49 @@ export default function Options() {
         <form className="options__form" onSubmit={handleSubmit}>
           <div className="options__form-header">
             <div>
-              <h2>{draft.id ? 'Edit record' : 'New record'}</h2>
-              <p>Use selectors only when a page needs custom targeting.</p>
+              <h2>{draft.id ? '编辑记录' : '新建记录'}</h2>
+              <p>只有页面需要自定义定位时，才需要填写选择器。</p>
             </div>
             <button
               className="options__ghost"
               onClick={resetDraft}
               type="button"
             >
-              Clear form
+              清空表单
             </button>
           </div>
 
           <label>
-            <span>Name</span>
+            <span>名称</span>
             <input
               autoComplete="off"
               onChange={(event) => updateDraft('name', event.target.value)}
-              placeholder="Staging Admin"
+              placeholder="例如：测试环境后台"
               type="text"
               value={draft.name}
             />
           </label>
 
           <label>
-            <span>Site pattern</span>
+            <span>站点规则</span>
             <input
+              ref={sitePatternInputRef}
               autoComplete="off"
               onChange={(event) =>
                 updateDraft('sitePattern', event.target.value)
               }
-              placeholder="staging.example.com or *.internal"
+              placeholder="例如：staging.example.com 或 *.internal"
               type="text"
               value={draft.sitePattern}
             />
           </label>
 
           <label>
-            <span>Reference</span>
+            <span>备注来源</span>
             <input
               autoComplete="off"
               onChange={(event) => updateDraft('reference', event.target.value)}
-              placeholder="Where this password came from"
+              placeholder="例如：工单、同事、文档或来源说明"
               type="text"
               value={draft.reference}
             />
@@ -205,26 +236,26 @@ export default function Options() {
 
           <div className="options__field-grid">
             <label>
-              <span>Username</span>
+              <span>用户名</span>
               <input
                 autoComplete="off"
                 onChange={(event) =>
                   updateDraft('username', event.target.value)
                 }
-                placeholder="admin@example.com"
+                placeholder="例如：admin@example.com"
                 type="text"
                 value={draft.username}
               />
             </label>
 
             <label>
-              <span>Password</span>
+              <span>密码</span>
               <input
                 autoComplete="off"
                 onChange={(event) =>
                   updateDraft('password', event.target.value)
                 }
-                placeholder="Password"
+                placeholder="请输入密码"
                 type="password"
                 value={draft.password}
               />
@@ -233,7 +264,7 @@ export default function Options() {
 
           <div className="options__field-grid">
             <label>
-              <span>Username selector</span>
+              <span>用户名选择器</span>
               <input
                 autoComplete="off"
                 onChange={(event) =>
@@ -246,7 +277,7 @@ export default function Options() {
             </label>
 
             <label>
-              <span>Password selector</span>
+              <span>密码选择器</span>
               <input
                 autoComplete="off"
                 onChange={(event) =>
@@ -260,10 +291,10 @@ export default function Options() {
           </div>
 
           <label>
-            <span>Notes</span>
+            <span>备注</span>
             <textarea
               onChange={(event) => updateDraft('notes', event.target.value)}
-              placeholder="Optional environment notes, ports, or reminders."
+              placeholder="可填写环境说明、端口信息或其他提醒。"
               rows={5}
               value={draft.notes}
             />
@@ -271,10 +302,10 @@ export default function Options() {
 
           <button className="options__submit" disabled={isSaving} type="submit">
             {isSaving
-              ? 'Saving...'
+              ? '保存中...'
               : draft.id
-              ? 'Update record'
-              : 'Save record'}
+              ? '更新记录'
+              : '保存记录'}
           </button>
 
           {statusMessage ? (
@@ -284,33 +315,41 @@ export default function Options() {
 
         <section className="options__records">
           <div className="options__records-header">
-            <h2>Saved records</h2>
-            <span>{records.length}</span>
+            <h2>已保存记录</h2>
+            <div className="options__records-meta">
+              <span>{records.length}</span>
+              <button
+                className="options__ghost"
+                disabled={records.length === 0}
+                onClick={handleExportCsv}
+                type="button"
+              >
+                导出 CSV
+              </button>
+            </div>
           </div>
 
           <label className="options__search">
-            <span>Search</span>
+            <span>搜索</span>
             <input
               autoComplete="off"
               onChange={(event) => setSearchQuery(event.target.value)}
-              placeholder="Find by name, site, username, reference, or notes"
+              placeholder="按名称、站点、账号、来源或备注搜索"
               type="search"
               value={searchQuery}
             />
           </label>
 
           {isLoading ? (
-            <p className="options__empty">Loading saved records...</p>
+            <p className="options__empty">正在加载已保存记录...</p>
           ) : null}
           {!isLoading && records.length === 0 ? (
             <p className="options__empty">
-              Create a record for each environment you log into often.
+              为常用环境创建记录后，就可以更快地登录和管理账号。
             </p>
           ) : null}
           {!isLoading && records.length > 0 && filteredRecords.length === 0 ? (
-            <p className="options__empty">
-              No records match the current search.
-            </p>
+            <p className="options__empty">没有符合当前搜索条件的记录。</p>
           ) : null}
 
           {!isLoading
@@ -321,31 +360,42 @@ export default function Options() {
                       <h3>{record.name}</h3>
                       <p>{record.sitePattern}</p>
                     </div>
-                    <span>{formatDate(record.updatedAt)}</span>
+                    <div className="options__record-meta">
+                      <button
+                        aria-label={`复制「${record.name}」为新记录`}
+                        className="options__icon-button"
+                        onClick={() => handleDuplicate(record)}
+                        title="复制为新记录"
+                        type="button"
+                      >
+                        <DuplicateIcon />
+                      </button>
+                      <span>{formatDate(record.updatedAt)}</span>
+                    </div>
                   </div>
 
                   <dl className="options__record-details">
                     <div>
-                      <dt>Reference</dt>
-                      <dd>{record.reference || 'No reference'}</dd>
+                      <dt>备注来源</dt>
+                      <dd>{record.reference || '未填写'}</dd>
                     </div>
                     <div>
-                      <dt>Username</dt>
-                      <dd>{record.username || 'Not set'}</dd>
+                      <dt>用户名</dt>
+                      <dd>{record.username || '未设置'}</dd>
                     </div>
                     <div>
-                      <dt>Selectors</dt>
+                      <dt>选择器</dt>
                       <dd>
                         {record.usernameSelector || record.passwordSelector
-                          ? `${record.usernameSelector || 'auto'} / ${
-                              record.passwordSelector || 'auto'
+                          ? `${record.usernameSelector || '自动'} / ${
+                              record.passwordSelector || '自动'
                             }`
-                          : 'Automatic'}
+                          : '自动识别'}
                       </dd>
                     </div>
                     <div>
-                      <dt>Notes</dt>
-                      <dd>{record.notes || 'No notes'}</dd>
+                      <dt>备注</dt>
+                      <dd>{record.notes || '未填写'}</dd>
                     </div>
                   </dl>
 
@@ -355,14 +405,14 @@ export default function Options() {
                       onClick={() => handleEdit(record)}
                       type="button"
                     >
-                      Edit
+                      编辑
                     </button>
                     <button
                       className="options__danger"
                       onClick={() => void handleDelete(record)}
                       type="button"
                     >
-                      Delete
+                      删除
                     </button>
                   </div>
                 </article>

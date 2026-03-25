@@ -1,11 +1,13 @@
-import { FormEvent, useEffect, useState } from 'react';
+import { FormEvent, useEffect, useRef, useState } from 'react';
 import {
   detectSelectors,
   executeAutofill,
   getActiveTab,
   openOptionsPage,
 } from '../../shared/chrome';
-import { matchesRecordSearch } from '../../shared/records';
+import CopyIcon from '../../shared/CopyIcon';
+import DuplicateIcon from '../../shared/DuplicateIcon';
+import { createDuplicateDraft, matchesRecordSearch } from '../../shared/records';
 import {
   createEmptyDraft,
   deletePasswordRecord,
@@ -56,6 +58,8 @@ export default function Popup() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [isDetecting, setIsDetecting] = useState(false);
+  const [sitePatternFocusNonce, setSitePatternFocusNonce] = useState(0);
+  const sitePatternInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     let isMounted = true;
@@ -107,6 +111,15 @@ export default function Popup() {
       isMounted = false;
     };
   }, []);
+
+  useEffect(() => {
+    if (sitePatternFocusNonce === 0 || activeTab !== 'create') {
+      return;
+    }
+
+    sitePatternInputRef.current?.focus();
+    sitePatternInputRef.current?.select();
+  }, [activeTab, sitePatternFocusNonce]);
 
   const matchingRecords = activeTabUrl
     ? findMatchingRecords(records, activeTabUrl)
@@ -218,6 +231,13 @@ export default function Popup() {
     });
     setActiveTab('create');
     setStatusMessage(`正在编辑「${record.name}」。`);
+  }
+
+  function handleDuplicate(record: PasswordRecord) {
+    setDraft(createDuplicateDraft(record));
+    setActiveTab('create');
+    setStatusMessage(`已复制「${record.name}」为新记录，请修改站点规则后再保存。`);
+    setSitePatternFocusNonce((current) => current + 1);
   }
 
   async function handleDetectSelectors() {
@@ -366,13 +386,37 @@ export default function Popup() {
                 <div className="popup__card-top">
                   <div>
                     <h3>{record.name}</h3>
-                    <p>{record.sitePattern}</p>
+                    <div className="popup__host-row">
+                      <p>{record.sitePattern}</p>
+                      <button
+                        aria-label={`复制「${record.name}」的站点规则`}
+                        className="popup__icon-button popup__icon-button--inline"
+                        onClick={() =>
+                          void handleCopy(record.sitePattern, '站点规则')
+                        }
+                        title="复制站点规则"
+                        type="button"
+                      >
+                        <CopyIcon />
+                      </button>
+                    </div>
                   </div>
-                  <span className="popup__badge">
-                    {matchingRecords.some((item) => item.id === record.id)
-                      ? '匹配'
-                      : '已保存'}
-                  </span>
+                  <div className="popup__card-meta">
+                    <button
+                      aria-label={`复制「${record.name}」为新记录`}
+                      className="popup__icon-button"
+                      onClick={() => handleDuplicate(record)}
+                      title="复制为新记录"
+                      type="button"
+                    >
+                      <DuplicateIcon />
+                    </button>
+                    <span className="popup__badge">
+                      {matchingRecords.some((item) => item.id === record.id)
+                        ? '匹配'
+                        : '已保存'}
+                    </span>
+                  </div>
                 </div>
                 <dl className="popup__details">
                   <div>
@@ -475,6 +519,7 @@ export default function Popup() {
               <label className="popup__field">
                 <span>站点规则</span>
                 <input
+                  ref={sitePatternInputRef}
                   autoComplete="off"
                   onChange={(event) =>
                     updateDraft('sitePattern', event.target.value)
@@ -621,7 +666,18 @@ export default function Popup() {
                     <h3>{record.name}</h3>
                     <p>{record.sitePattern}</p>
                   </div>
-                  <span className="popup__badge">已保存</span>
+                  <div className="popup__card-meta">
+                    <button
+                      aria-label={`复制「${record.name}」为新记录`}
+                      className="popup__icon-button"
+                      onClick={() => handleDuplicate(record)}
+                      title="复制为新记录"
+                      type="button"
+                    >
+                      <DuplicateIcon />
+                    </button>
+                    <span className="popup__badge">已保存</span>
+                  </div>
                 </div>
                 <dl className="popup__details">
                   <div>

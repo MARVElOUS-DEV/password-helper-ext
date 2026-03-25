@@ -2,12 +2,15 @@ import { PasswordRecord } from '../types';
 
 const CSV_HEADERS = [
   'name',
+  'accountLabel',
   'sitePattern',
   'reference',
   'username',
   'password',
   'usernameSelector',
   'passwordSelector',
+  'isDefault',
+  'lastUsedAt',
   'notes',
   'updatedAt',
 ] as const;
@@ -28,12 +31,15 @@ function createCsvContent(records: PasswordRecord[]) {
     ...records.map((record) =>
       [
         record.name,
+        record.accountLabel,
         record.sitePattern,
         record.reference,
         record.username,
         record.password,
         record.usernameSelector,
         record.passwordSelector,
+        String(record.isDefault),
+        record.lastUsedAt,
         record.notes,
         record.updatedAt,
       ]

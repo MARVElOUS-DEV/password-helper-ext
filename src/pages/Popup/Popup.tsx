@@ -7,18 +7,45 @@ import {
 } from '../../shared/chrome';
 import CopyIcon from '../../shared/CopyIcon';
 import DuplicateIcon from '../../shared/DuplicateIcon';
-import { createDuplicateDraft, matchesRecordSearch } from '../../shared/records';
+import {
+  createDuplicateDraft,
+  getRecordAccountTitle,
+  matchesRecordSearch,
+  sortAutofillRecords,
+} from '../../shared/records';
 import {
   createEmptyDraft,
   deletePasswordRecord,
   getPasswordRecords,
+  markPasswordRecordUsed,
   savePasswordRecord,
 } from '../../shared/storage';
 import { findMatchingRecords, getUrlLabel } from '../../shared/url';
 import { PasswordDraft, PasswordRecord } from '../../types';
 
-function maskPassword(password: string) {
-  return password ? '\u2022'.repeat(Math.min(password.length, 12)) : '未设置';
+function formatLastUsed(value: string) {
+  if (!value) {
+    return '未使用';
+  }
+
+  return new Intl.DateTimeFormat(undefined, {
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(new Date(value));
+}
+
+function groupRecordsBySitePattern(records: PasswordRecord[]) {
+  const groups = new Map<string, PasswordRecord[]>();
+
+  records.forEach((record) => {
+    const current = groups.get(record.sitePattern) ?? [];
+    current.push(record);
+    groups.set(record.sitePattern, current);
+  });
+
+  return Array.from(groups.entries());
 }
 
 type PopupTab = 'autofill' | 'create' | 'records';
@@ -58,8 +85,8 @@ export default function Popup() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [isDetecting, setIsDetecting] = useState(false);
-  const [sitePatternFocusNonce, setSitePatternFocusNonce] = useState(0);
-  const sitePatternInputRef = useRef<HTMLInputElement | null>(null);
+  const [accountLabelFocusNonce, setAccountLabelFocusNonce] = useState(0);
+  const accountLabelInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     let isMounted = true;
@@ -113,20 +140,29 @@ export default function Popup() {
   }, []);
 
   useEffect(() => {
-    if (sitePatternFocusNonce === 0 || activeTab !== 'create') {
+    if (accountLabelFocusNonce === 0 || activeTab !== 'create') {
       return;
     }
 
-    sitePatternInputRef.current?.focus();
-    sitePatternInputRef.current?.select();
-  }, [activeTab, sitePatternFocusNonce]);
+    accountLabelInputRef.current?.focus();
+    accountLabelInputRef.current?.select();
+  }, [accountLabelFocusNonce, activeTab]);
 
   const matchingRecords = activeTabUrl
-    ? findMatchingRecords(records, activeTabUrl)
+    ? sortAutofillRecords(findMatchingRecords(records, activeTabUrl))
     : [];
-  const fallbackRecords = matchingRecords.length > 0 ? [] : records.slice(0, 4);
-  const visibleRecords = [...matchingRecords, ...fallbackRecords].filter(
-    (record) => matchesRecordSearch(record, autofillSearch)
+  const visibleMatchingRecords = matchingRecords.filter((record) =>
+    matchesRecordSearch(record, autofillSearch)
+  );
+  const fallbackRecords =
+    matchingRecords.length > 0 ? [] : sortAutofillRecords(records).slice(0, 4);
+  const visibleFallbackRecords = fallbackRecords.filter((record) =>
+    matchesRecordSearch(record, autofillSearch)
+  );
+  const visibleRecordCount =
+    visibleMatchingRecords.length + visibleFallbackRecords.length;
+  const matchingRecordGroups = groupRecordsBySitePattern(
+    visibleMatchingRecords
   );
   const visibleStoredRecords = records.filter((record) =>
     matchesRecordSearch(record, recordsSearch)
@@ -148,6 +184,11 @@ export default function Popup() {
         usernameSelector: record.usernameSelector,
         passwordSelector: record.passwordSelector,
       });
+
+      if (result.success) {
+        await markPasswordRecordUsed(record.id);
+        await refreshRecords();
+      }
 
       setStatusMessage(result.message);
     } catch (error) {
@@ -221,12 +262,15 @@ export default function Popup() {
     setDraft({
       id: record.id,
       name: record.name,
+      accountLabel: record.accountLabel,
       sitePattern: record.sitePattern,
       reference: record.reference,
       username: record.username,
       password: record.password,
       usernameSelector: record.usernameSelector,
       passwordSelector: record.passwordSelector,
+      isDefault: record.isDefault,
+      lastUsedAt: record.lastUsedAt,
       notes: record.notes,
     });
     setActiveTab('create');
@@ -236,8 +280,10 @@ export default function Popup() {
   function handleDuplicate(record: PasswordRecord) {
     setDraft(createDuplicateDraft(record));
     setActiveTab('create');
-    setStatusMessage(`已复制「${record.name}」为新记录，请修改站点规则后再保存。`);
-    setSitePatternFocusNonce((current) => current + 1);
+    setStatusMessage(
+      `已复制「${record.name}」为新记录，请修改账号标识或用户名后再保存。`
+    );
+    setAccountLabelFocusNonce((current) => current + 1);
   }
 
   async function handleDetectSelectors() {
@@ -290,6 +336,93 @@ export default function Popup() {
     : '当前没有可用的网页标签页';
   const activeTabMeta =
     TAB_CONFIG.find((tab) => tab.id === activeTab) ?? TAB_CONFIG[0];
+
+  function renderRecordCard(record: PasswordRecord, badge: string) {
+    const title = getRecordAccountTitle(record);
+
+    return (
+      <article className="popup__card" key={record.id}>
+        <div className="popup__card-top">
+          <div>
+            <h3>{title}</h3>
+            <div className="popup__host-row">
+              <p>{record.sitePattern}</p>
+              <button
+                aria-label={`复制「${record.name}」的站点规则`}
+                className="popup__icon-button popup__icon-button--inline"
+                onClick={() => void handleCopy(record.sitePattern, '站点规则')}
+                title="复制站点规则"
+                type="button"
+              >
+                <CopyIcon />
+              </button>
+            </div>
+          </div>
+          <div className="popup__card-meta">
+            <button
+              aria-label={`复制「${record.name}」为新记录`}
+              className="popup__icon-button"
+              onClick={() => handleDuplicate(record)}
+              title="复制为新记录"
+              type="button"
+            >
+              <DuplicateIcon />
+            </button>
+            <div className="popup__card-badges">
+              {record.isDefault ? (
+                <span className="popup__badge popup__badge--accent">
+                  默认账号
+                </span>
+              ) : null}
+              <span className="popup__badge">{badge}</span>
+            </div>
+          </div>
+        </div>
+        <dl className="popup__details">
+          <div>
+            <dt>记录名称</dt>
+            <dd>{record.name}</dd>
+          </div>
+          <div>
+            <dt>账号标识</dt>
+            <dd>{record.accountLabel || '未填写'}</dd>
+          </div>
+          <div>
+            <dt>用户名</dt>
+            <dd>{record.username || '未设置'}</dd>
+          </div>
+          <div>
+            <dt>上次使用</dt>
+            <dd>{formatLastUsed(record.lastUsedAt)}</dd>
+          </div>
+        </dl>
+        <div className="popup__actions">
+          <button
+            className="popup__button popup__button--primary"
+            onClick={() => void handleAutofill(record)}
+            type="button"
+            disabled={isSubmitting}
+          >
+            自动填充
+          </button>
+          <button
+            className="popup__button"
+            onClick={() => void handleCopy(record.username, '用户名')}
+            type="button"
+          >
+            复制账号
+          </button>
+          <button
+            className="popup__button"
+            onClick={() => void handleCopy(record.password, '密码')}
+            type="button"
+          >
+            复制密码
+          </button>
+        </div>
+      </article>
+    );
+  }
 
   return (
     <main className="popup">
@@ -352,7 +485,7 @@ export default function Popup() {
                   {matchingRecords.length > 0 ? '当前页面匹配结果' : '快速填充'}
                 </h2>
                 <p className="popup__panel-copy">
-                  优先显示与当前页面匹配的记录，匹配不到时显示最近保存的记录。
+                  优先显示与当前页面匹配的账号，并按默认账号和最近使用时间排序。
                 </p>
               </div>
             </div>
@@ -362,7 +495,7 @@ export default function Popup() {
               <input
                 autoComplete="off"
                 onChange={(event) => setAutofillSearch(event.target.value)}
-                placeholder="快速查找记录"
+                placeholder="快速查找账号、站点或备注"
                 type="search"
                 value={autofillSearch}
               />
@@ -375,89 +508,30 @@ export default function Popup() {
               </div>
             ) : null}
 
-            {hasAnyRecords && visibleRecords.length === 0 ? (
+            {hasAnyRecords && visibleRecordCount === 0 ? (
               <div className="popup__empty">
                 <p>没有符合当前搜索条件的记录。</p>
               </div>
             ) : null}
 
-            {visibleRecords.map((record) => (
-              <article className="popup__card" key={record.id}>
-                <div className="popup__card-top">
+            {matchingRecordGroups.map(([sitePattern, group]) => (
+              <section className="popup__match-group" key={sitePattern}>
+                <div className="popup__match-group-header">
                   <div>
-                    <h3>{record.name}</h3>
-                    <div className="popup__host-row">
-                      <p>{record.sitePattern}</p>
-                      <button
-                        aria-label={`复制「${record.name}」的站点规则`}
-                        className="popup__icon-button popup__icon-button--inline"
-                        onClick={() =>
-                          void handleCopy(record.sitePattern, '站点规则')
-                        }
-                        title="复制站点规则"
-                        type="button"
-                      >
-                        <CopyIcon />
-                      </button>
-                    </div>
+                    <h3>{sitePattern}</h3>
+                    <p className="popup__panel-copy">
+                      {group.length} 个账号可用于当前页面。
+                    </p>
                   </div>
-                  <div className="popup__card-meta">
-                    <button
-                      aria-label={`复制「${record.name}」为新记录`}
-                      className="popup__icon-button"
-                      onClick={() => handleDuplicate(record)}
-                      title="复制为新记录"
-                      type="button"
-                    >
-                      <DuplicateIcon />
-                    </button>
-                    <span className="popup__badge">
-                      {matchingRecords.some((item) => item.id === record.id)
-                        ? '匹配'
-                        : '已保存'}
-                    </span>
-                  </div>
+                  <span className="popup__badge">{group.length}</span>
                 </div>
-                <dl className="popup__details">
-                  <div>
-                    <dt>备注来源</dt>
-                    <dd>{record.reference || '未填写'}</dd>
-                  </div>
-                  <div>
-                    <dt>用户名</dt>
-                    <dd>{record.username || '未设置'}</dd>
-                  </div>
-                  <div>
-                    <dt>密码</dt>
-                    <dd>{maskPassword(record.password)}</dd>
-                  </div>
-                </dl>
-                <div className="popup__actions">
-                  <button
-                    className="popup__button popup__button--primary"
-                    onClick={() => void handleAutofill(record)}
-                    type="button"
-                    disabled={isSubmitting}
-                  >
-                    自动填充
-                  </button>
-                  <button
-                    className="popup__button"
-                    onClick={() => void handleCopy(record.username, '用户名')}
-                    type="button"
-                  >
-                    复制账号
-                  </button>
-                  <button
-                    className="popup__button"
-                    onClick={() => void handleCopy(record.password, '密码')}
-                    type="button"
-                  >
-                    复制密码
-                  </button>
-                </div>
-              </article>
+                {group.map((record) => renderRecordCard(record, '匹配'))}
+              </section>
             ))}
+
+            {visibleFallbackRecords.map((record) =>
+              renderRecordCard(record, '最近保存')
+            )}
           </section>
         ) : null}
 
@@ -505,21 +579,38 @@ export default function Popup() {
                 </div>
               </div>
 
-              <label className="popup__field">
-                <span>名称</span>
-                <input
-                  autoComplete="off"
-                  onChange={(event) => updateDraft('name', event.target.value)}
-                  placeholder="例如：测试环境后台"
-                  type="text"
-                  value={draft.name}
-                />
-              </label>
+              <div className="popup__grid">
+                <label className="popup__field">
+                  <span>名称</span>
+                  <input
+                    autoComplete="off"
+                    onChange={(event) =>
+                      updateDraft('name', event.target.value)
+                    }
+                    placeholder="例如：测试环境后台"
+                    type="text"
+                    value={draft.name}
+                  />
+                </label>
+
+                <label className="popup__field">
+                  <span>账号标识</span>
+                  <input
+                    ref={accountLabelInputRef}
+                    autoComplete="off"
+                    onChange={(event) =>
+                      updateDraft('accountLabel', event.target.value)
+                    }
+                    placeholder="例如：管理员 / 测试账号 / 张三"
+                    type="text"
+                    value={draft.accountLabel}
+                  />
+                </label>
+              </div>
 
               <label className="popup__field">
                 <span>站点规则</span>
                 <input
-                  ref={sitePatternInputRef}
                   autoComplete="off"
                   onChange={(event) =>
                     updateDraft('sitePattern', event.target.value)
@@ -609,6 +700,17 @@ export default function Popup() {
                 />
               </label>
 
+              <label className="popup__checkbox">
+                <input
+                  checked={draft.isDefault}
+                  onChange={(event) =>
+                    updateDraft('isDefault', event.target.checked)
+                  }
+                  type="checkbox"
+                />
+                <span>设为该站点默认账号</span>
+              </label>
+
               <button
                 className="popup__button popup__button--primary popup__submit"
                 type="submit"
@@ -663,7 +765,7 @@ export default function Popup() {
               <article className="popup__card" key={record.id}>
                 <div className="popup__card-top">
                   <div>
-                    <h3>{record.name}</h3>
+                    <h3>{getRecordAccountTitle(record)}</h3>
                     <p>{record.sitePattern}</p>
                   </div>
                   <div className="popup__card-meta">
@@ -676,21 +778,32 @@ export default function Popup() {
                     >
                       <DuplicateIcon />
                     </button>
-                    <span className="popup__badge">已保存</span>
+                    <div className="popup__card-badges">
+                      {record.isDefault ? (
+                        <span className="popup__badge popup__badge--accent">
+                          默认账号
+                        </span>
+                      ) : null}
+                      <span className="popup__badge">已保存</span>
+                    </div>
                   </div>
                 </div>
                 <dl className="popup__details">
                   <div>
-                    <dt>备注来源</dt>
-                    <dd>{record.reference || '未填写'}</dd>
+                    <dt>记录名称</dt>
+                    <dd>{record.name}</dd>
+                  </div>
+                  <div>
+                    <dt>账号标识</dt>
+                    <dd>{record.accountLabel || '未填写'}</dd>
                   </div>
                   <div>
                     <dt>用户名</dt>
                     <dd>{record.username || '未设置'}</dd>
                   </div>
                   <div>
-                    <dt>密码</dt>
-                    <dd>{maskPassword(record.password)}</dd>
+                    <dt>上次使用</dt>
+                    <dd>{formatLastUsed(record.lastUsedAt)}</dd>
                   </div>
                 </dl>
                 <div className="popup__actions">

@@ -1,12 +1,15 @@
 export interface PasswordRecord {
   id: string;
   name: string;
+  accountLabel: string;
   sitePattern: string;
   reference: string;
   username: string;
   password: string;
   usernameSelector: string;
   passwordSelector: string;
+  isDefault: boolean;
+  lastUsedAt: string;
   notes: string;
   updatedAt: string;
 }
@@ -14,12 +17,15 @@ export interface PasswordRecord {
 export interface PasswordDraft {
   id?: string;
   name: string;
+  accountLabel: string;
   sitePattern: string;
   reference: string;
   username: string;
   password: string;
   usernameSelector: string;
   passwordSelector: string;
+  isDefault: boolean;
+  lastUsedAt?: string;
   notes: string;
 }
 
